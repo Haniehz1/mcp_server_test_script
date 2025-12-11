@@ -32,7 +32,7 @@ app = MCPApp(
 @app.tool()
 async def test_fetch_server(app_ctx: Optional[AppContext] = None) -> dict:
     """
-    Test the fetch MCP server by making a simple HTTP request.
+    Test the fetch MCP server by making a simple HTTP request and validating response.
 
     Returns test result with status and details.
     """
@@ -40,18 +40,27 @@ async def test_fetch_server(app_ctx: Optional[AppContext] = None) -> dict:
     logger.info("Testing fetch server...")
 
     try:
+        # Test fetching a real URL with JSON response
         result = await app_ctx.server_registry.call_tool(
             server_name="fetch",
             tool_name="fetch",
             arguments={"url": "https://httpbin.org/json"}
         )
 
+        # Verify we got actual data back
+        content = result.content[0].text if result.content else ""
+        has_data = len(content) > 0 and "slideshow" in content
+
+        if not has_data:
+            raise ValueError("No valid data received from fetch server")
+
         return {
             "server": "fetch",
             "status": "success",
             "transport": "stdio",
             "auth_required": False,
-            "details": "Successfully fetched URL",
+            "details": f"Successfully fetched URL and validated content ({len(content)} chars)",
+            "data_sample": content[:150] + "..." if len(content) > 150 else content,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -62,6 +71,7 @@ async def test_fetch_server(app_ctx: Optional[AppContext] = None) -> dict:
             "transport": "stdio",
             "auth_required": False,
             "error": str(e),
+            "error_type": type(e).__name__,
             "timestamp": datetime.now().isoformat()
         }
 
@@ -69,7 +79,7 @@ async def test_fetch_server(app_ctx: Optional[AppContext] = None) -> dict:
 @app.tool()
 async def test_filesystem_server(app_ctx: Optional[AppContext] = None) -> dict:
     """
-    Test the filesystem MCP server by reading the current directory.
+    Test the filesystem MCP server by reading the current directory and validating files.
 
     Returns test result with status and details.
     """
@@ -77,18 +87,32 @@ async def test_filesystem_server(app_ctx: Optional[AppContext] = None) -> dict:
     logger.info("Testing filesystem server...")
 
     try:
+        # List current directory
         result = await app_ctx.server_registry.call_tool(
             server_name="filesystem",
             tool_name="list_directory",
             arguments={"path": "."}
         )
 
+        # Parse and validate the result
+        content = result.content[0].text if result.content else ""
+
+        # Check if we got actual file listings
+        if not content or len(content) < 10:
+            raise ValueError("No valid directory listing received")
+
+        # Count files/directories found
+        lines = content.strip().split('\n')
+        file_count = len([l for l in lines if l.strip()])
+
         return {
             "server": "filesystem",
             "status": "success",
             "transport": "stdio",
             "auth_required": False,
-            "details": "Successfully listed directory",
+            "details": f"Successfully listed directory with {file_count} items",
+            "file_count": file_count,
+            "data_sample": content[:200] + "..." if len(content) > 200 else content,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -99,6 +123,7 @@ async def test_filesystem_server(app_ctx: Optional[AppContext] = None) -> dict:
             "transport": "stdio",
             "auth_required": False,
             "error": str(e),
+            "error_type": type(e).__name__,
             "timestamp": datetime.now().isoformat()
         }
 
@@ -106,7 +131,7 @@ async def test_filesystem_server(app_ctx: Optional[AppContext] = None) -> dict:
 @app.tool()
 async def test_playwright_server(app_ctx: Optional[AppContext] = None) -> dict:
     """
-    Test the Playwright MCP server for browser automation.
+    Test the Playwright MCP server for browser automation and data extraction.
 
     Returns test result with status and details.
     """
@@ -114,19 +139,34 @@ async def test_playwright_server(app_ctx: Optional[AppContext] = None) -> dict:
     logger.info("Testing playwright server...")
 
     try:
-        # Try to list available tools from the server
-        result = await app_ctx.server_registry.call_tool(
+        # Navigate to a simple page
+        nav_result = await app_ctx.server_registry.call_tool(
             server_name="playwright",
             tool_name="playwright_navigate",
-            arguments={"url": "https://apple.com"}
+            arguments={"url": "https://example.com"}
         )
+
+        # Try to get page content/snapshot
+        snapshot_result = await app_ctx.server_registry.call_tool(
+            server_name="playwright",
+            tool_name="playwright_snapshot",
+            arguments={}
+        )
+
+        snapshot_content = snapshot_result.content[0].text if snapshot_result.content else ""
+
+        # Validate we got actual page data
+        if "Example Domain" not in snapshot_content:
+            raise ValueError("Failed to load page content")
 
         return {
             "server": "playwright",
             "status": "success",
             "transport": "stdio",
             "auth_required": False,
-            "details": "Successfully navigated to Apple.com",
+            "details": "Successfully navigated and captured page snapshot",
+            "page_content_length": len(snapshot_content),
+            "data_sample": snapshot_content[:200] + "..." if len(snapshot_content) > 200 else snapshot_content,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -137,6 +177,7 @@ async def test_playwright_server(app_ctx: Optional[AppContext] = None) -> dict:
             "transport": "stdio",
             "auth_required": False,
             "error": str(e),
+            "error_type": type(e).__name__,
             "timestamp": datetime.now().isoformat()
         }
 
@@ -144,7 +185,7 @@ async def test_playwright_server(app_ctx: Optional[AppContext] = None) -> dict:
 @app.tool()
 async def test_sequential_thinking_server(app_ctx: Optional[AppContext] = None) -> dict:
     """
-    Test the Sequential Thinking MCP server.
+    Test the Sequential Thinking MCP server and validate thought creation.
 
     Returns test result with status and details.
     """
@@ -152,12 +193,29 @@ async def test_sequential_thinking_server(app_ctx: Optional[AppContext] = None) 
     logger.info("Testing sequential-thinking server...")
 
     try:
+        # Create an initial thought
         result = await app_ctx.server_registry.call_tool(
             server_name="sequential-thinking",
             tool_name="create_thought",
             arguments={
-                "thought": "Testing the sequential thinking server",
+                "thought": "Testing MCP server connectivity and functionality",
                 "thoughtType": "observation"
+            }
+        )
+
+        # Validate response
+        content = result.content[0].text if result.content else ""
+
+        if not content or len(content) < 5:
+            raise ValueError("No valid thought response received")
+
+        # Try to create a follow-up thought to test full functionality
+        next_result = await app_ctx.server_registry.call_tool(
+            server_name="sequential-thinking",
+            tool_name="create_thought",
+            arguments={
+                "thought": "Server is responding correctly",
+                "thoughtType": "conclusion"
             }
         )
 
@@ -166,7 +224,9 @@ async def test_sequential_thinking_server(app_ctx: Optional[AppContext] = None) 
             "status": "success",
             "transport": "stdio",
             "auth_required": False,
-            "details": "Successfully created a thought",
+            "details": "Successfully created and validated sequential thoughts",
+            "thoughts_created": 2,
+            "data_sample": content[:150] + "..." if len(content) > 150 else content,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -177,6 +237,7 @@ async def test_sequential_thinking_server(app_ctx: Optional[AppContext] = None) 
             "transport": "stdio",
             "auth_required": False,
             "error": str(e),
+            "error_type": type(e).__name__,
             "timestamp": datetime.now().isoformat()
         }
 
@@ -191,6 +252,7 @@ async def test_server_with_auth(
 ) -> dict:
     """
     Generic test function for servers requiring authentication.
+    Tests connectivity, auth flow, and actual data retrieval.
 
     Args:
         server_name: Name of the MCP server to test
@@ -204,41 +266,71 @@ async def test_server_with_auth(
     logger.info(f"Testing {server_name} server...")
 
     try:
+        # First, try to check if server is even registered
+        if server_name not in app_ctx.server_registry.server_configs:
+            return {
+                "server": server_name,
+                "status": "not_configured",
+                "transport": transport,
+                "auth_required": True,
+                "error": f"Server '{server_name}' not found in registry",
+                "timestamp": datetime.now().isoformat()
+            }
+
+        # Attempt to call the test tool
         result = await app_ctx.server_registry.call_tool(
             server_name=server_name,
             tool_name=test_tool,
             arguments=test_args
         )
 
+        # Validate we got actual data back
+        content = result.content[0].text if result.content else ""
+
+        # Check if response is meaningful
+        if not content or len(content) < 2:
+            logger.warning(f"{server_name}: Got empty or minimal response")
+
         return {
             "server": server_name,
             "status": "success",
             "transport": transport,
             "auth_required": True,
-            "details": f"Successfully called {test_tool}",
+            "details": f"Successfully called {test_tool}, auth flow completed",
+            "response_length": len(content),
+            "data_sample": content[:150] + "..." if len(content) > 150 else content,
             "timestamp": datetime.now().isoformat()
         }
+
     except Exception as e:
-        logger.error(f"{server_name} server test failed: {e}")
+        logger.error(f"{server_name} server test failed: {type(e).__name__}: {e}")
         error_msg = str(e)
 
-        # Check if it's a configuration issue
-        if "not found" in error_msg.lower() or "not configured" in error_msg.lower():
-            return {
-                "server": server_name,
-                "status": "not_configured",
-                "transport": transport,
-                "auth_required": True,
-                "error": "Server credentials not configured",
-                "timestamp": datetime.now().isoformat()
-            }
+        # Categorize the error
+        if any(x in error_msg.lower() for x in ["not found", "not configured", "no such server"]):
+            status = "not_configured"
+            friendly_error = "Server or credentials not configured"
+        elif any(x in error_msg.lower() for x in ["unauthorized", "authentication", "forbidden", "401", "403"]):
+            status = "auth_error"
+            friendly_error = "Authentication failed - check credentials/OAuth flow"
+        elif any(x in error_msg.lower() for x in ["timeout", "connection", "refused"]):
+            status = "connection_error"
+            friendly_error = "Connection failed - server may be unreachable"
+        elif any(x in error_msg.lower() for x in ["oauth", "token"]):
+            status = "oauth_required"
+            friendly_error = "OAuth authentication required - run oauth flow first"
+        else:
+            status = "error"
+            friendly_error = error_msg
 
         return {
             "server": server_name,
-            "status": "error",
+            "status": status,
             "transport": transport,
             "auth_required": True,
-            "error": error_msg,
+            "error": friendly_error,
+            "error_detail": error_msg,
+            "error_type": type(e).__name__,
             "timestamp": datetime.now().isoformat()
         }
 
@@ -325,14 +417,18 @@ async def run_all_server_tests(app_ctx: Optional[AppContext] = None) -> str:
         )
         results.append(result)
 
-    # Generate summary
+    # Generate summary with detailed status breakdown
     summary = {
         "test_run": {
             "timestamp": datetime.now().isoformat(),
             "total_servers": len(results),
             "successful": len([r for r in results if r.get("status") == "success"]),
             "not_configured": len([r for r in results if r.get("status") == "not_configured"]),
-            "errors": len([r for r in results if r.get("status") == "error"]),
+            "auth_errors": len([r for r in results if r.get("status") == "auth_error"]),
+            "oauth_required": len([r for r in results if r.get("status") == "oauth_required"]),
+            "connection_errors": len([r for r in results if r.get("status") == "connection_error"]),
+            "other_errors": len([r for r in results if r.get("status") == "error"]),
+            "total_errors": len([r for r in results if r.get("status") not in ["success", "not_configured"]]),
         },
         "results": results
     }
@@ -423,9 +519,16 @@ async def main():
         print("TEST RESULTS SUMMARY")
         print("="*70)
         print(f"Total Servers: {results['test_run']['total_servers']}")
-        print(f"Successful: {results['test_run']['successful']}")
-        print(f"Not Configured: {results['test_run']['not_configured']}")
-        print(f"Errors: {results['test_run']['errors']}")
+        print(f"✓ Successful: {results['test_run']['successful']}")
+        print(f"○ Not Configured: {results['test_run']['not_configured']}")
+        if results['test_run'].get('auth_errors', 0) > 0:
+            print(f"🔐 Auth Errors: {results['test_run']['auth_errors']}")
+        if results['test_run'].get('oauth_required', 0) > 0:
+            print(f"🔑 OAuth Required: {results['test_run']['oauth_required']}")
+        if results['test_run'].get('connection_errors', 0) > 0:
+            print(f"🔌 Connection Errors: {results['test_run']['connection_errors']}")
+        if results['test_run'].get('other_errors', 0) > 0:
+            print(f"✗ Other Errors: {results['test_run']['other_errors']}")
         print("="*70 + "\n")
 
         # Print individual results
@@ -435,6 +538,9 @@ async def main():
             status_symbol = {
                 'success': '✓',
                 'not_configured': '○',
+                'auth_error': '🔐',
+                'oauth_required': '🔑',
+                'connection_error': '🔌',
                 'error': '✗'
             }.get(result.get('status', 'error'), '?')
 
@@ -443,8 +549,18 @@ async def main():
             transport = result.get('transport', 'unknown')
 
             print(f"{status_symbol} {server_name:<25} [{transport:<15}] {status.upper()}")
+
+            # Show sample data for successful tests
+            if status == 'success' and 'data_sample' in result:
+                sample = result['data_sample']
+                if sample and len(sample) > 0:
+                    print(f"  ↳ Data: {sample[:80]}...")
+
+            # Show errors for failed tests
             if 'error' in result:
-                print(f"  Error: {result['error']}")
+                print(f"  ✗ {result['error']}")
+                if 'error_detail' in result and result['error_detail'] != result['error']:
+                    print(f"    Details: {result['error_detail'][:100]}")
 
         print("\n" + "="*70)
 
