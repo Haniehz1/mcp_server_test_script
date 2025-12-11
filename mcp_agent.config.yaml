@@ -2,6 +2,8 @@
 # Config definition: https://github.com/lastmile-ai/mcp-agent/blob/main/src/mcp_agent/config.py
 $schema: https://raw.githubusercontent.com/lastmile-ai/mcp-agent/refs/heads/main/schema/mcp-agent.config.schema.json
 
+name: mcp-server-tester
+description: "Testing framework for validating MCP servers with mcp-agent SDK and cloud deployment"
 
 logger:
   transports: [console, file]
@@ -11,6 +13,8 @@ logger:
 # Configure MCP Servers connections (supports stdio, sse, streamable_http, and websockets)
 mcp:
   servers:
+    # ===== NO AUTH REQUIRED SERVERS =====
+
     # Filesystem access server
     filesystem:
       command: npx
@@ -20,8 +24,96 @@ mcp:
     fetch:
       command: uvx
       args: ["mcp-server-fetch"]
-      #env:  # Environment variables passed to the stdio server
-      #  ROOT_PATH: "/workspace"
+
+    # Browser automation server
+    playwright:
+      command: npx
+      args: ["@playwright/mcp@latest"]
+
+    # Structured reasoning server
+    sequential-thinking:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+
+    # ===== API KEY AUTH SERVERS =====
+
+    # Airweave search server
+    airweave-search:
+      command: npx
+      args: ["-y", "airweave-mcp-search"]
+      env:
+        AIRWEAVE_API_KEY: "${AIRWEAVE_API_KEY}"
+        AIRWEAVE_COLLECTION: "${AIRWEAVE_COLLECTION}"
+
+    # CircleCI server
+    circleci:
+      command: npx
+      args: ["-y", "@circleci/mcp-server-circleci@latest"]
+      env:
+        CIRCLECI_TOKEN: "${CIRCLECI_TOKEN}"
+
+    # Perplexity server
+    perplexity:
+      command: npx
+      args: ["-y", "@perplexity-ai/mcp-server"]
+      env:
+        PERPLEXITY_API_KEY: "${PERPLEXITY_API_KEY}"
+
+    # Google Maps Grounding Lite server
+    maps-grounding-lite:
+      transport: streamable_http
+      url: "https://mapstools.googleapis.com/mcp"
+      headers:
+        X-Goog-Api-Key: "${GOOGLE_MAPS_API_KEY}"
+
+    # HubSpot server
+    hubspot:
+      transport: streamable_http
+      url: "https://mcp.hubspot.com/"
+      headers:
+        Authorization: "Bearer ${HUBSPOT_ACCESS_TOKEN}"
+        X-HubSpot-ClientId: "${HUBSPOT_CLIENT_ID}"
+
+    # Supabase server
+    supabase:
+      transport: streamable_http
+      url: "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}"
+      headers:
+        Authorization: "Bearer ${SUPABASE_ACCESS_TOKEN}"
+
+    # ===== OAUTH / SSE SERVERS =====
+
+    # Atlassian server (Jira/Confluence)
+    atlassian:
+      transport: sse
+      url: "https://mcp.atlassian.com/v1/sse"
+
+    # Figma server
+    figma:
+      transport: streamable_http
+      url: "https://mcp.figma.com/mcp"
+
+    # GitHub server
+    github:
+      transport: streamable_http
+      url: "https://api.githubcopilot.com/mcp/"
+      auth:
+        oauth:
+          enabled: true
+          scopes: ["read:org", "public_repo", "user:email"]
+          authorization_server: "https://github.com/login/oauth"
+          use_internal_callback: false
+          include_resource_parameter: false
+
+    # Linear server
+    linear:
+      transport: streamable_http
+      url: "https://mcp.linear.app/mcp"
+
+    # Notion server
+    notion:
+      transport: streamable_http
+      url: "https://mcp.notion.com/mcp"
 
 
 # Model provider defaults (API keys go in mcp_agent.secrets.yaml)

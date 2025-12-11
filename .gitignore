@@ -91,3 +91,6 @@ dmypy.json
 # Local environment variables
 .env.local
 .env.*.local
+
+# Test results
+test_results/*.json

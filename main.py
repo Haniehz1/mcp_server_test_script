@@ -1,163 +1,453 @@
 """
-Welcome to mcp-agent! We believe MCP is all you need to build and deploy agents.
-This is a canonical getting-started example that covers everything you need to know to get started.
+MCP Server Testing Framework
 
-We will cover:
-  - Hello world agent: Setting up a basic Agent that uses the fetch and filesystem MCP servers to do cool stuff.
-  - @app.tool and @app.async_tool decorators to expose your agents as long-running tools on an MCP server.
-  - Advanced MCP features: Notifications, sampling, and elicitation
+A comprehensive testing system for validating MCP server compatibility with mcp-agent SDK.
+Tests 15 different MCP servers across various transport types and authentication methods.
 
-You can run this example locally using "uv run main.py", and also deploy it as an MCP server using "mcp-agent deploy".
-
-Let's get started!
+Run locally: uv run main.py
+Deploy to cloud: mcp-agent deploy mcp-server-tester
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+from datetime import datetime
 from typing import Optional
+from pathlib import Path
 
 from mcp_agent.app import MCPApp
-from mcp_agent.agents.agent import Agent
-from mcp_agent.agents.agent_spec import AgentSpec
 from mcp_agent.core.context import Context as AppContext
-from mcp_agent.workflows.factory import create_agent
-
-# We are using the OpenAI augmented LLM for this example but you can swap with others (e.g. AnthropicAugmentedLLM)
 from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
 
-# Create the MCPApp, the root of mcp-agent.
+# Create the MCPApp
 app = MCPApp(
-    name="hello_world",
-    description="Hello world mcp-agent application",
-    # settings= <specify programmatically if needed; by default, configuration is read from mcp_agent.config.yaml/mcp_agent.secrets.yaml>
+    name="mcp-server-tester",
+    description="Testing framework for validating MCP servers with mcp-agent SDK",
 )
 
 
-# Hello world agent: an Agent using MCP servers + LLM
+# ===== INDIVIDUAL SERVER TEST TOOLS =====
+
 @app.tool()
-async def finder_agent(request: str, app_ctx: Optional[AppContext] = None) -> str:
+async def test_fetch_server(app_ctx: Optional[AppContext] = None) -> dict:
     """
-    Run an Agent with access to MCP servers (fetch + filesystem) to handle the input request.
+    Test the fetch MCP server by making a simple HTTP request.
 
-    Notes:
-    - @app.tool:
-      - runs the function as a long-running workflow tool when deployed as an MCP server
-      - no-op when running this locally as a script
-    - app_ctx:
-      - MCPApp Context (configuration, logger, upstream session, etc.)
+    Returns test result with status and details.
     """
-
     logger = app_ctx.app.logger
-    # Logger requests are forwarded as notifications/message to the client over MCP.
-    logger.info(f"finder_tool called with request: {request}")
+    logger.info("Testing fetch server...")
 
-    agent = Agent(
-        name="finder",
-        instruction=(
-            "You are a helpful assistant. Use MCP servers to fetch and read files,"
-            " then answer the request concisely."
-        ),
-        server_names=["fetch", "filesystem"],
-        context=app_ctx,
-    )
+    try:
+        result = await app_ctx.server_registry.call_tool(
+            server_name="fetch",
+            tool_name="fetch",
+            arguments={"url": "https://httpbin.org/json"}
+        )
 
-    async with agent:
-        llm = await agent.attach_llm(OpenAIAugmentedLLM)
-        result = await llm.generate_str(message=request)
-        return result
+        return {
+            "server": "fetch",
+            "status": "success",
+            "transport": "stdio",
+            "auth_required": False,
+            "details": "Successfully fetched URL",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Fetch server test failed: {e}")
+        return {
+            "server": "fetch",
+            "status": "error",
+            "transport": "stdio",
+            "auth_required": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 
-# Run a configured agent by name (defined in mcp_agent.config.yaml)
-@app.async_tool(name="run_agent_async")
-async def run_agent(
-    agent_name: str = "web_helper",
-    prompt: str = "Please summarize the first paragraph of https://modelcontextprotocol.io/docs/getting-started/intro",
-    app_ctx: Optional[AppContext] = None,
-) -> str:
+@app.tool()
+async def test_filesystem_server(app_ctx: Optional[AppContext] = None) -> dict:
     """
-    Load an agent defined in mcp_agent.config.yaml by name and run it.
+    Test the filesystem MCP server by reading the current directory.
 
-    Notes:
-    - @app.async_tool:
-      - async version of @app.tool -- returns a workflow ID back (can be used with workflows-get_status tool)
-      - runs the function as a long-running workflow tool when deployed as an MCP server
-      - no-op when running this locally as a script
+    Returns test result with status and details.
     """
-
     logger = app_ctx.app.logger
+    logger.info("Testing filesystem server...")
 
-    agent_definitions = (
-        app.config.agents.definitions
-        if app is not None
-        and app.config is not None
-        and app.config.agents is not None
-        and app.config.agents.definitions is not None
-        else []
-    )
+    try:
+        result = await app_ctx.server_registry.call_tool(
+            server_name="filesystem",
+            tool_name="list_directory",
+            arguments={"path": "."}
+        )
 
-    agent_spec: AgentSpec | None = None
-    for agent_def in agent_definitions:
-        if agent_def.name == agent_name:
-            agent_spec = agent_def
-            break
+        return {
+            "server": "filesystem",
+            "status": "success",
+            "transport": "stdio",
+            "auth_required": False,
+            "details": "Successfully listed directory",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Filesystem server test failed: {e}")
+        return {
+            "server": "filesystem",
+            "status": "error",
+            "transport": "stdio",
+            "auth_required": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
-    if agent_spec is None:
-        logger.error("Agent not found", data={"name": agent_name})
-        return f"agent '{agent_name}' not found"
 
-    logger.info(
-        "Agent found in spec",
-        data={"name": agent_name, "instruction": agent_spec.instruction},
-    )
+@app.tool()
+async def test_playwright_server(app_ctx: Optional[AppContext] = None) -> dict:
+    """
+    Test the Playwright MCP server for browser automation.
 
-    agent = create_agent(agent_spec, context=app_ctx)
+    Returns test result with status and details.
+    """
+    logger = app_ctx.app.logger
+    logger.info("Testing playwright server...")
 
-    async with agent:
-        llm = await agent.attach_llm(OpenAIAugmentedLLM)
-        return await llm.generate_str(message=prompt)
+    try:
+        # Try to list available tools from the server
+        result = await app_ctx.server_registry.call_tool(
+            server_name="playwright",
+            tool_name="playwright_navigate",
+            arguments={"url": "https://apple.com"}
+        )
+
+        return {
+            "server": "playwright",
+            "status": "success",
+            "transport": "stdio",
+            "auth_required": False,
+            "details": "Successfully navigated to Apple.com",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Playwright server test failed: {e}")
+        return {
+            "server": "playwright",
+            "status": "error",
+            "transport": "stdio",
+            "auth_required": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.tool()
+async def test_sequential_thinking_server(app_ctx: Optional[AppContext] = None) -> dict:
+    """
+    Test the Sequential Thinking MCP server.
+
+    Returns test result with status and details.
+    """
+    logger = app_ctx.app.logger
+    logger.info("Testing sequential-thinking server...")
+
+    try:
+        result = await app_ctx.server_registry.call_tool(
+            server_name="sequential-thinking",
+            tool_name="create_thought",
+            arguments={
+                "thought": "Testing the sequential thinking server",
+                "thoughtType": "observation"
+            }
+        )
+
+        return {
+            "server": "sequential-thinking",
+            "status": "success",
+            "transport": "stdio",
+            "auth_required": False,
+            "details": "Successfully created a thought",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Sequential thinking server test failed: {e}")
+        return {
+            "server": "sequential-thinking",
+            "status": "error",
+            "transport": "stdio",
+            "auth_required": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+@app.tool()
+async def test_server_with_auth(
+    server_name: str,
+    test_tool: str,
+    test_args: dict,
+    transport: str,
+    app_ctx: Optional[AppContext] = None
+) -> dict:
+    """
+    Generic test function for servers requiring authentication.
+
+    Args:
+        server_name: Name of the MCP server to test
+        test_tool: Tool name to call for testing
+        test_args: Arguments for the test tool
+        transport: Transport type (stdio, sse, streamable_http)
+
+    Returns test result with status and details.
+    """
+    logger = app_ctx.app.logger
+    logger.info(f"Testing {server_name} server...")
+
+    try:
+        result = await app_ctx.server_registry.call_tool(
+            server_name=server_name,
+            tool_name=test_tool,
+            arguments=test_args
+        )
+
+        return {
+            "server": server_name,
+            "status": "success",
+            "transport": transport,
+            "auth_required": True,
+            "details": f"Successfully called {test_tool}",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"{server_name} server test failed: {e}")
+        error_msg = str(e)
+
+        # Check if it's a configuration issue
+        if "not found" in error_msg.lower() or "not configured" in error_msg.lower():
+            return {
+                "server": server_name,
+                "status": "not_configured",
+                "transport": transport,
+                "auth_required": True,
+                "error": "Server credentials not configured",
+                "timestamp": datetime.now().isoformat()
+            }
+
+        return {
+            "server": server_name,
+            "status": "error",
+            "transport": transport,
+            "auth_required": True,
+            "error": error_msg,
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+# ===== MAIN TEST ORCHESTRATOR =====
+
+@app.async_tool()
+async def run_all_server_tests(app_ctx: Optional[AppContext] = None) -> str:
+    """
+    Run comprehensive tests on all configured MCP servers.
+
+    This is a long-running workflow that tests all 15 MCP servers and generates
+    a detailed report showing which servers are working, which need configuration,
+    and which have errors.
+
+    Returns: JSON string with test results for all servers.
+    """
+    logger = app_ctx.app.logger
+    logger.info("Starting comprehensive MCP server testing...")
+
+    results = []
+
+    # Test no-auth servers
+    logger.info("Testing servers without authentication requirements...")
+
+    no_auth_tests = [
+        test_fetch_server(app_ctx=app_ctx),
+        test_filesystem_server(app_ctx=app_ctx),
+        test_playwright_server(app_ctx=app_ctx),
+        test_sequential_thinking_server(app_ctx=app_ctx),
+    ]
+
+    for test_result in await asyncio.gather(*no_auth_tests, return_exceptions=True):
+        if isinstance(test_result, Exception):
+            logger.error(f"Test failed with exception: {test_result}")
+            results.append({
+                "status": "error",
+                "error": str(test_result),
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            results.append(test_result)
+
+    # Test API key auth servers
+    logger.info("Testing servers with API key authentication...")
+
+    api_key_servers = [
+        ("airweave-search", "search", {"query": "test"}, "stdio"),
+        ("circleci", "get_project", {"project_slug": "gh/test/test"}, "stdio"),
+        ("perplexity", "search", {"query": "test"}, "stdio"),
+        ("maps-grounding-lite", "search_places", {"query": "coffee shop"}, "streamable_http"),
+        ("hubspot", "search_contacts", {"query": "test"}, "streamable_http"),
+        ("supabase", "list_projects", {}, "streamable_http"),
+    ]
+
+    for server_name, tool_name, args, transport in api_key_servers:
+        result = await test_server_with_auth(
+            server_name=server_name,
+            test_tool=tool_name,
+            test_args=args,
+            transport=transport,
+            app_ctx=app_ctx
+        )
+        results.append(result)
+
+    # Test OAuth/SSE servers
+    logger.info("Testing servers with OAuth/SSE authentication...")
+
+    oauth_servers = [
+        ("atlassian", "search_issues", {"jql": "project = TEST"}, "sse"),
+        ("figma", "get_file", {"file_key": "test"}, "streamable_http"),
+        ("github", "list_repos", {"username": "test"}, "streamable_http"),
+        ("linear", "search_issues", {"query": "test"}, "streamable_http"),
+        ("notion", "search", {"query": "test"}, "streamable_http"),
+    ]
+
+    for server_name, tool_name, args, transport in oauth_servers:
+        result = await test_server_with_auth(
+            server_name=server_name,
+            test_tool=tool_name,
+            test_args=args,
+            transport=transport,
+            app_ctx=app_ctx
+        )
+        results.append(result)
+
+    # Generate summary
+    summary = {
+        "test_run": {
+            "timestamp": datetime.now().isoformat(),
+            "total_servers": len(results),
+            "successful": len([r for r in results if r.get("status") == "success"]),
+            "not_configured": len([r for r in results if r.get("status") == "not_configured"]),
+            "errors": len([r for r in results if r.get("status") == "error"]),
+        },
+        "results": results
+    }
+
+    # Save results to file
+    output_dir = Path("test_results")
+    output_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = output_dir / f"mcp_server_test_results_{timestamp}.json"
+
+    with open(output_file, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    logger.info(f"Test results saved to {output_file}")
+    logger.info(f"Summary: {summary['test_run']['successful']}/{summary['test_run']['total_servers']} servers working")
+
+    return json.dumps(summary, indent=2)
+
+
+@app.tool()
+async def get_server_status_summary(app_ctx: Optional[AppContext] = None) -> str:
+    """
+    Get a quick summary of all configured MCP servers and their expected status.
+
+    Returns: Human-readable summary of server configuration.
+    """
+    servers = {
+        "No Authentication Required": [
+            "fetch - Web requests and HTTP calls",
+            "filesystem - Local file operations",
+            "playwright - Browser automation",
+            "sequential-thinking - Structured reasoning",
+        ],
+        "API Key Authentication": [
+            "airweave-search - Airweave knowledge base search",
+            "circleci - CI/CD pipeline information",
+            "perplexity - Web search and reasoning",
+            "maps-grounding-lite - Google Maps tools",
+            "hubspot - CRM data access",
+            "supabase - Database operations",
+        ],
+        "OAuth/Remote Authentication": [
+            "atlassian - Jira and Confluence",
+            "figma - Design file access",
+            "github - GitHub repositories and actions",
+            "linear - Issue tracking",
+            "notion - Workspace content",
+        ],
+    }
+
+    summary = ["MCP Server Configuration Summary", "=" * 50, ""]
+
+    for category, server_list in servers.items():
+        summary.append(f"\n{category}:")
+        summary.append("-" * 50)
+        for server in server_list:
+            summary.append(f"  • {server}")
+
+    summary.append("\n" + "=" * 50)
+    summary.append(f"Total: {sum(len(s) for s in servers.values())} servers configured")
+    summary.append("\nRun 'run_all_server_tests' to test all servers")
+
+    return "\n".join(summary)
 
 
 async def main():
+    """Main entry point for local testing."""
     async with app.run() as agent_app:
-        # Run the agent
-        readme_summary = await finder_agent(
-            request="Please summarize the README.md file in this directory.",
-            app_ctx=agent_app.context,
-        )
-        print("README.md file summary:")
-        print(readme_summary)
+        print("\n" + "="*70)
+        print("MCP SERVER TESTING FRAMEWORK")
+        print("="*70 + "\n")
 
-        webpage_summary = await run_agent(
-            agent_name="web_helper",
-            prompt="Please summarize the first few paragraphs of https://modelcontextprotocol.io/docs/getting-started/intro.",
-            app_ctx=agent_app.context,
-        )
-        print("Webpage summary:")
-        print(webpage_summary)
+        # Get server summary
+        summary = await get_server_status_summary(app_ctx=agent_app.context)
+        print(summary)
 
-        # UNCOMMENT to run this MCPApp as an MCP server
-        #########################################################
-        # Create the MCP server that exposes both workflows and agent configurations,
-        # optionally using custom FastMCP settings
-        # from mcp_agent.server.app_server import create_mcp_server_for_app
-        # mcp_server = create_mcp_server_for_app(agent_app)
+        print("\n" + "="*70)
+        print("RUNNING COMPREHENSIVE SERVER TESTS")
+        print("="*70 + "\n")
 
-        # # Run the server
-        # await mcp_server.run_sse_async()
+        # Run all tests
+        results_json = await run_all_server_tests(app_ctx=agent_app.context)
+        results = json.loads(results_json)
+
+        # Print summary
+        print("\n" + "="*70)
+        print("TEST RESULTS SUMMARY")
+        print("="*70)
+        print(f"Total Servers: {results['test_run']['total_servers']}")
+        print(f"Successful: {results['test_run']['successful']}")
+        print(f"Not Configured: {results['test_run']['not_configured']}")
+        print(f"Errors: {results['test_run']['errors']}")
+        print("="*70 + "\n")
+
+        # Print individual results
+        print("Individual Server Results:")
+        print("-" * 70)
+        for result in results['results']:
+            status_symbol = {
+                'success': '✓',
+                'not_configured': '○',
+                'error': '✗'
+            }.get(result.get('status', 'error'), '?')
+
+            server_name = result.get('server', 'unknown')
+            status = result.get('status', 'error')
+            transport = result.get('transport', 'unknown')
+
+            print(f"{status_symbol} {server_name:<25} [{transport:<15}] {status.upper()}")
+            if 'error' in result:
+                print(f"  Error: {result['error']}")
+
+        print("\n" + "="*70)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# When you're ready to deploy this MCPApp as a remote SSE server, run:
-# > uv run mcp-agent deploy "hello_world" --no-auth
-#
-# Congrats! You made it to the end of the getting-started example!
-# There is a lot more that mcp-agent can do, and we hope you'll explore the rest of the documentation.
-# Check out other examples in the mcp-agent repo:
-# https://github.com/lastmile-ai/mcp-agent/tree/main/examples
-# and read the docs (or ask an mcp-agent to do it for you):
-# https://docs.mcp-agent.com/
-#
-# Happy mcp-agenting!
